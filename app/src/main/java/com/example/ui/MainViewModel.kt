@@ -59,26 +59,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _systemStats = MutableStateFlow(systemInfoManager.getLiveSystemStats())
     val systemStats: StateFlow<SystemStats> = _systemStats
 
-    init {
-        heartbeat.start(viewModelScope)
-        nodeRegistry.importLegacyConnectionOnce(swarmConnection)
-        viewModelScope.launch {
-            repository.resetDeviceTelemetryOnLaunch()
-            // Keep a device row and (for agent / bridge nodes) a live stream per node.
-            nodeRegistry.nodes.collect { list ->
-                repository.syncDevicesFromNodes(list)
-                reconcileStreams(list)
-            }
-        }
-        viewModelScope.launch {
-            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                // Poll nodes that have no live stream (LucyServer, or streams that are down).
-                val streaming = linkStates.value.filterValues { it == LinkState.Live }.keys
-                repository.refreshPolledNodes(nodeRegistry.nodes.value, streaming)
-                kotlinx.coroutines.delay(30_000)
-            }
-        }
-    }
+    // NOTE: the init block is at the END of the property declarations (just above onCleared) on purpose.
+    // Its coroutines start running immediately on the main thread, and a property declared below an init
+    // block is still null at that moment. That crashed the app right after login (see MainViewModelTest).
 
     // ── Nodes ─────────────────────────────────────────────────────────────────
     val nodes: StateFlow<List<Node>> = nodeRegistry.nodes
@@ -377,6 +360,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun sendHidEnter() {
         _avatarSpeech.value = "USB keyboard injection is not supported by this app. Use the connected computer's terminal."
+    }
+
+    init {
+        heartbeat.start(viewModelScope)
+        nodeRegistry.importLegacyConnectionOnce(swarmConnection)
+        viewModelScope.launch {
+            repository.resetDeviceTelemetryOnLaunch()
+            // Keep a device row and (for agent / bridge nodes) a live stream per node.
+            nodeRegistry.nodes.collect { list ->
+                repository.syncDevicesFromNodes(list)
+                reconcileStreams(list)
+            }
+        }
+        viewModelScope.launch {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                // Poll nodes that have no live stream (LucyServer, or streams that are down).
+                val streaming = linkStates.value.filterValues { it == LinkState.Live }.keys
+                repository.refreshPolledNodes(nodeRegistry.nodes.value, streaming)
+                kotlinx.coroutines.delay(30_000)
+            }
+        }
     }
 
     override fun onCleared() {
