@@ -80,12 +80,15 @@ class AppRepository(
 
     suspend fun removeDeviceForNode(node: Node) = database.deviceSyncDao().deleteByIp(node.host)
 
+    /// Phone nodes report their battery; show it in the status line (no database column needed).
+    private fun batteryNote(stats: RemoteTelemetry) = if (stats.battery >= 0) " · battery ${stats.battery}%" else ""
+
     /// Applies one live (SSE) update to the node's row. Storage is kept when the update does not carry it.
     internal suspend fun applyLiveTelemetry(node: Node, stats: RemoteTelemetry) {
         val dao = database.deviceSyncDao()
         val row = dao.getAllDevices().first().firstOrNull { it.ipAddress.equals(node.host, ignoreCase = true) } ?: return
         dao.updateDevice(row.copy(isConnected = true, lastSyncTime = System.currentTimeMillis(),
-            syncStatus = "Live (SSE)", cpuLoadPercent = stats.cpu, ramLoadPercent = stats.ram,
+            syncStatus = "Live (SSE)" + batteryNote(stats), cpuLoadPercent = stats.cpu, ramLoadPercent = stats.ram,
             storageAvailableGb = if (stats.storage >= 0) stats.storage else row.storageAvailableGb))
     }
 
@@ -121,7 +124,7 @@ class AppRepository(
                 }
                 database.deviceSyncDao().updateDevice(device.copy(
                     isConnected = true, lastSyncTime = System.currentTimeMillis(),
-                    syncStatus = "Telemetry received", cpuLoadPercent = stats.cpu,
+                    syncStatus = "Telemetry received" + batteryNote(stats), cpuLoadPercent = stats.cpu,
                     ramLoadPercent = stats.ram, storageAvailableGb = stats.storage,
                     pingMs = ((System.nanoTime() - started) / 1_000_000).toInt()))
                 true

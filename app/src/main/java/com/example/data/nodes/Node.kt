@@ -13,7 +13,10 @@ enum class NodeBackend(val label: String, val defaultPort: Int, val pairsWithCod
     AGENT("I30LTZ node agent", 7437, pairsWithCode = true, hasLiveStream = true),
 
     /** Recovery OS `sse_bridge.py`: Bearer token from a pairing code, SSE at /sse/telemetry. */
-    SSE_BRIDGE("Recovery OS SSE bridge", 7300, pairsWithCode = true, hasLiveStream = true);
+    SSE_BRIDGE("Recovery OS SSE bridge", 7300, pairsWithCode = true, hasLiveStream = true),
+
+    /** Another phone running I30LTZ Companion with "This phone as a node" on. Same API, telemetry only. */
+    PHONE("Phone running I30LTZ Companion", 7437, pairsWithCode = true, hasLiveStream = true);
 
     companion object {
         fun parse(name: String?): NodeBackend? = entries.firstOrNull { it.name == name }

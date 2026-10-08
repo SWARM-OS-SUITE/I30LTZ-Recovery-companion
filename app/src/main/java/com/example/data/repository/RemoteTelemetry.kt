@@ -3,7 +3,7 @@ package com.example.data.repository
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-internal data class RemoteTelemetry(val cpu: Int, val ram: Int, val storage: Int) {
+internal data class RemoteTelemetry(val cpu: Int, val ram: Int, val storage: Int, val battery: Int = -1) {
     companion object {
         fun parse(json: JSONObject): RemoteTelemetry {
             val cpu = json.getDouble("cpuUsagePercentage")
@@ -21,10 +21,12 @@ internal data class RemoteTelemetry(val cpu: Int, val ram: Int, val storage: Int
             require(ram.isFinite() && ram in 0.0..100.0) { "Invalid telemetry response" }
             val cpu = json.optDouble("cpu_percent", -1.0)
             val free = json.optDouble("storage_free_gb", -1.0)
+            val battery = json.optInt("battery_percent", -1).takeIf { it in 0..100 } ?: -1 // present only for phone nodes
             return RemoteTelemetry(
                 if (cpu.isFinite() && cpu in 0.0..100.0) cpu.roundToInt() else -1,
                 ram.roundToInt(),
-                if (free.isFinite() && free >= 0) free.toInt() else -1)
+                if (free.isFinite() && free >= 0) free.toInt() else -1,
+                battery)
         }
 
         /** Recovery OS bridge: /api/status and the /sse/telemetry stream (`cpu_pct`, `mem_pct`, `disks`). */

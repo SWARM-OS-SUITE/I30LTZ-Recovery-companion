@@ -83,6 +83,9 @@ fun NodeSecuritySection(nodes: List<Node>, security: Map<String, NodeSecurity>, 
         nodes.forEach { node ->
             when {
                 !node.isConfigured -> InfoCard(node, "Not paired yet. Pair it under Nodes first.")
+                node.backend == NodeBackend.PHONE -> InfoCard(
+                    node, "This is a phone. Android does not let one app scan another, so there is no malware scan for it. " +
+                        "Its telemetry (RAM, storage, battery) is on the Monitor tab.")
                 node.backend != NodeBackend.AGENT -> InfoCard(
                     node, "This node runs ${node.backend.label}, which has no malware scanner. Install the I30LTZ node agent on it " +
                         "(with ClamAV) and add it as an agent node to scan it.")

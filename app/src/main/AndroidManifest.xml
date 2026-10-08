@@ -68,6 +68,24 @@
             android:theme="@style/Theme.MyApplication" />
 
         <service
+            android:name=".data.phonenode.PhoneNodeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Lets the user's own other devices read this phone's RAM, storage and battery over their private Tailscale network, only after pairing with a one-time code shown on this phone. Nothing is sent to any server." />
+        </service>
+
+        <receiver
+            android:name=".data.phonenode.PhoneNodeBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <service
             android:name=".data.memory.MemorySyncJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />

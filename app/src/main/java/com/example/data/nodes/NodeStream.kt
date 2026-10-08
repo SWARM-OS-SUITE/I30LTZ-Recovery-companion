@@ -66,7 +66,7 @@ internal class NodeStream(private val node: Node, private val scope: CoroutineSc
     }
 
     private fun request(): Request {
-        val path = if (node.backend == NodeBackend.AGENT) "/v1/events" else "/sse/telemetry"
+        val path = if (node.backend == NodeBackend.AGENT || node.backend == NodeBackend.PHONE) "/v1/events" else "/sse/telemetry"
         return Request.Builder().url(node.baseUrl + path).authFor(node)
             .header("Accept", "text/event-stream").header("Cache-Control", "no-cache").build()
     }
@@ -75,7 +75,7 @@ internal class NodeStream(private val node: Node, private val scope: CoroutineSc
         if (event != "telemetry" && event != "message") return
         val parsed = runCatching {
             val o = JSONObject(data)
-            if (node.backend == NodeBackend.AGENT) RemoteTelemetry.parseAgent(o) else RemoteTelemetry.parseBridge(o)
+            if (node.backend == NodeBackend.AGENT || node.backend == NodeBackend.PHONE) RemoteTelemetry.parseAgent(o) else RemoteTelemetry.parseBridge(o)
         }.getOrNull() ?: return
         _telemetry.tryEmit(parsed)
     }

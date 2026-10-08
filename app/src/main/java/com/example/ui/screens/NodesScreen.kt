@@ -113,6 +113,7 @@ fun NodesScreen(
             )
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { PhoneNodeCard() }
             items(nodes, key = { it.id }) { node ->
                 NodeCard(node, linkStates[node.id], isPrimary(node)) { editing = node }
             }
@@ -177,6 +178,7 @@ private fun Choice(text: String, selected: Boolean, onClick: () -> Unit) {
 private fun pairingHint(backend: NodeBackend): String = when (backend) {
     NodeBackend.AGENT -> "On the node run:  i30ltz-node pair"
     NodeBackend.SSE_BRIDGE -> "On the node run:  curl -X POST http://127.0.0.1:7300/api/pairing-code"
+    NodeBackend.PHONE -> "On the other phone: Nodes → This phone as a node → switch on → SHOW PAIRING CODE"
     NodeBackend.LUCYSERVER -> ""
 }
 

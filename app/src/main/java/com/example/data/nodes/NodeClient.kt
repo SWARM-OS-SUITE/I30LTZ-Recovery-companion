@@ -71,7 +71,7 @@ internal object NodeClient {
     suspend fun probe(node: Node): Probe = withContext(Dispatchers.IO) {
         val path = when (node.backend) {
             NodeBackend.LUCYSERVER -> "/api/system/stats"
-            NodeBackend.AGENT -> "/v1/capabilities"
+            NodeBackend.AGENT, NodeBackend.PHONE -> "/v1/capabilities"
             NodeBackend.SSE_BRIDGE -> "/api/status"
         }
         try {
@@ -103,6 +103,14 @@ internal object NodeClient {
                 "Dr. I30LTZ (MAD IT) online: ${if (o.optBoolean("madit_online")) "yes" else "no"}. Pending approvals: ${o.optInt("pending_cmd_count")}.",
                 "Works: telemetry, command approvals, chat. Not available: process list/kill, scan, optimize.")
             NodeBackend.LUCYSERVER -> listOf("Token accepted. LucyServer answered.")
+            NodeBackend.PHONE -> {
+                val f = o.optJSONObject("features")
+                val live = listOfNotNull("telemetry".takeIf { f?.optBoolean("telemetry") == true }, "live updates".takeIf { f?.optBoolean("events") == true })
+                listOf(
+                    "Token accepted. Phone ${o.optString("hostname")} (${o.optString("os")}).",
+                    "Works: ${live.joinToString(", ").ifEmpty { "nothing" }} (RAM, storage, battery).",
+                    "Not possible on a phone: terminal, malware scans, process list/kill. Android does not let an app do those.")
+            }
         }
     }.getOrElse { listOf("Token accepted, but the answer was not in the expected format.") }
 
@@ -110,7 +118,7 @@ internal object NodeClient {
     suspend fun pair(backend: NodeBackend, host: String, port: Int, code: String, label: String): PairOutcome =
         withContext(Dispatchers.IO) {
             require(backend.pairsWithCode)
-            val path = if (backend == NodeBackend.AGENT) "/v1/pair" else "/api/pair"
+            val path = if (backend == NodeBackend.AGENT || backend == NodeBackend.PHONE) "/v1/pair" else "/api/pair"
             val body = JSONObject().put("code", code.trim()).put("label", label).toString().toRequestBody(json)
             try {
                 http.newCall(Request.Builder().url("http://$host:$port$path").post(body).build()).execute().use { r ->
@@ -132,7 +140,7 @@ internal object NodeClient {
     suspend fun telemetry(node: Node): RemoteTelemetry = withContext(Dispatchers.IO) {
         when (node.backend) {
             NodeBackend.LUCYSERVER -> call(node, get(node, "/api/system/stats")) { RemoteTelemetry.parse(JSONObject(it)) }
-            NodeBackend.AGENT -> call(node, get(node, "/v1/telemetry")) { RemoteTelemetry.parseAgent(JSONObject(it)) }
+            NodeBackend.AGENT, NodeBackend.PHONE -> call(node, get(node, "/v1/telemetry")) { RemoteTelemetry.parseAgent(JSONObject(it)) }
             NodeBackend.SSE_BRIDGE -> call(node, get(node, "/api/status")) { RemoteTelemetry.parseBridge(JSONObject(it)) }
         }
     }
@@ -148,6 +156,7 @@ internal object NodeClient {
                     .map { NodeProcess(it.getInt("pid"), it.getString("name"), it.getDouble("memory_mb").toInt()) } }
             }
             NodeBackend.SSE_BRIDGE -> throw UnsupportedOperationException("The Recovery bridge has no process list yet.")
+            NodeBackend.PHONE -> throw UnsupportedOperationException("A phone does not expose its processes: Android does not let an app list other apps.")
         }
     }
 
@@ -163,6 +172,7 @@ internal object NodeClient {
             }
             NodeBackend.AGENT -> call(node, Request.Builder().url(node.baseUrl + "/v1/processes/$pid/kill").authFor(node).post(empty).build()) { }
             NodeBackend.SSE_BRIDGE -> throw UnsupportedOperationException("The Recovery bridge cannot stop processes yet.")
+            NodeBackend.PHONE -> throw UnsupportedOperationException("A phone cannot stop other apps' processes: Android does not allow it.")
         }
         "${node.name} accepted the stop request for pid $pid."
     }

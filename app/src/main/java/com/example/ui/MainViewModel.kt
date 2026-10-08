@@ -159,6 +159,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             device == null -> "That device is no longer in the list."
             node == null -> "${device.deviceName}: no node is set up for ${device.ipAddress}. No scan was run and there is no verdict."
             !node.isConfigured -> "${node.name} is not paired yet. Pair it under Nodes first."
+            node.backend == NodeBackend.PHONE ->
+                "${node.name} is a phone: Android does not let an app scan other apps, so there is no scan and no verdict for it."
             node.backend != NodeBackend.AGENT ->
                 "${node.name} runs ${node.backend.label}, which has no malware scanner. Install the I30LTZ node agent on it to scan it. No scan was run and there is no verdict."
             else -> {
