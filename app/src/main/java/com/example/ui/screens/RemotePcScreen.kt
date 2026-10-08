@@ -28,6 +28,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.config.SwarmConnection
+import com.example.data.nodes.Node
+import com.example.data.nodes.NodeBackend
+import com.example.data.nodes.NodeRegistry
 import com.example.ui.theme.CarbonBorder
 import com.example.ui.theme.CarbonSurface
 import com.example.ui.theme.CarbonSurfaceVariant
@@ -40,7 +43,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
 @Composable
-fun RemotePcScreen(onBack: () -> Unit = {}) {
+fun RemotePcScreen(onBack: () -> Unit = {}, onManageNodes: () -> Unit = {}) {
     val context = LocalContext.current
     val connection = remember { SwarmConnection(context) }
 
@@ -186,6 +189,21 @@ fun RemotePcScreen(onBack: () -> Unit = {}) {
                 }
 
                 Surface(
+                    color = Color(0xFFE040FB).copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE040FB)),
+                    modifier = Modifier.clickable(onClick = onManageNodes)
+                ) {
+                    Text(
+                        text = "NODES",
+                        color = Color(0xFFE040FB),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
                     color = NvidiaGreen.copy(alpha = 0.15f),
                     shape = RoundedCornerShape(8.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, NvidiaGreen),
@@ -260,6 +278,15 @@ fun RemotePcScreen(onBack: () -> Unit = {}) {
                                 connection.host = host
                                 connection.authToken = authTokenInput
                                 portInput.toIntOrNull()?.takeIf { it in 1..65535 }?.let { connection.port = it }
+                                // Keep the node list in step so this node also shows up in Monitor and process control.
+                                NodeRegistry.get(context).let { registry ->
+                                    val existing = registry.findByHost(host)
+                                    registry.upsert(existing?.takeIf { it.backend == NodeBackend.LUCYSERVER }
+                                        ?.copy(port = connection.port, token = connection.authToken)
+                                        ?: existing
+                                        ?: Node(name = host, os = "Other", backend = NodeBackend.LUCYSERVER,
+                                            host = host, port = connection.port, token = connection.authToken))
+                                }
                                 com.example.data.memory.MemorySyncEngine.connectionChanged()
                                 if (connection.hitlAlertsEnabled) com.example.data.hitl.HitlApprovalService.restart(context)
                                 isIpConfigExpanded = false

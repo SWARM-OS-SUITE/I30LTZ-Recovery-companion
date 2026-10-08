@@ -11,5 +11,7 @@ enum class NavigationTab {
     AVATAR_3D,
     TERMINAL,
     CHEAT_SHEET,
-    MEMORY
+    MEMORY,
+    NODES,
+    LEGACY_TERMINAL
 }

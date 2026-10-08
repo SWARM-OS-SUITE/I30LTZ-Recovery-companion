@@ -17,6 +17,9 @@ interface DeviceSyncDao {
     @Query("SELECT * FROM device_sync WHERE id = :id LIMIT 1")
     suspend fun getDeviceById(id: Long): DeviceSyncEntity?
 
+    @Query("DELETE FROM device_sync WHERE ipAddress = :ip COLLATE NOCASE")
+    suspend fun deleteByIp(ip: String)
+
     @Query("SELECT COUNT(*) FROM device_sync")
     suspend fun getDeviceCount(): Int
 

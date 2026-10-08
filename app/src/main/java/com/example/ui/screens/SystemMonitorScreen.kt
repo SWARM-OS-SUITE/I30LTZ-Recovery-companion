@@ -40,7 +40,8 @@ fun SystemMonitorScreen(
     onRefreshStats: () -> Unit,
     onSuperchargeClick: () -> Unit,
     onOptimizeDevice: (Long) -> Unit,
-    onMalwareScanDevice: (Long) -> Unit
+    onMalwareScanDevice: (Long) -> Unit,
+    onManageNodes: () -> Unit = {}
 ) {
     var selectedId by remember { mutableStateOf(PHONE_ID) }
     var killedProcs by remember { mutableStateOf(setOf<String>()) }
@@ -123,6 +124,12 @@ fun SystemMonitorScreen(
                         onClick = { selectedId = dev.id; killedProcs = emptySet() }
                     )
                 }
+                DeviceChip(
+                    label = "＋ Nodes",
+                    selected = false,
+                    isOnline = true,
+                    onClick = onManageNodes
+                )
             }
         }
 

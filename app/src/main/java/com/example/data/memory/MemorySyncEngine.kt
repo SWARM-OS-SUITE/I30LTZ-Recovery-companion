@@ -138,13 +138,13 @@ object MemorySyncEngine {
     val meshEnabled: StateFlow<Boolean> = _meshEnabled.asStateFlow()
 
     /**
-     * The default token is public, so a phone serving its memory on the LAN
-     * behind it would expose everything to anyone on the Wi-Fi. Syncing out to
-     * 13E457-THUNDERI30LT still works; serving and discovery wait for a real token.
+     * Without a token a phone serving its memory on the LAN would expose
+     * everything to anyone on the Wi-Fi. Syncing out to 13E457-THUNDERI30LT
+     * still works; serving and discovery wait for a real token.
      */
     fun startMeshIfSecure() {
         if (!started) return
-        val secure = connection.authToken.isNotBlank() && connection.authToken != SwarmConnection.DEFAULT_TOKEN
+        val secure = connection.authToken.isNotBlank()
         if (secure && !server.isRunning) {
             server.start()
             discovery.start()

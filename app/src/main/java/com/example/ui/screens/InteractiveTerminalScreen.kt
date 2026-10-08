@@ -60,6 +60,10 @@ fun InteractiveTerminalScreen(
     }
 
     DisposableEffect(targetIp, attempt) {
+        if (!connection.isUsable) {
+            log("No node configured. Add one under Nodes (Monitor tab), then reconnect.")
+            return@DisposableEffect onDispose { }
+        }
         if (attempt > 0) log("Reconnecting to ${connection.host}:${connection.port}…")
         val request = Request.Builder()
             .url("${connection.wsBase()}/api/terminal/ws")

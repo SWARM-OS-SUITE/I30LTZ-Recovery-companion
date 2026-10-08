@@ -5,6 +5,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.config.SwarmConnection
 import com.example.data.db.*
+import com.example.data.nodes.LinkState
+import com.example.data.nodes.Node
+import com.example.data.nodes.NodeBackend
+import com.example.data.nodes.NodeSecurity
+import com.example.data.nodes.NodeSecurityController
+import com.example.data.nodes.NodeRegistry
+import com.example.data.nodes.NodeStream
 import com.example.data.repository.AppRepository
 import com.example.data.service.CompanionHeartbeat
 import com.example.data.service.GeminiAiService
@@ -25,7 +32,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val geminiAiService = GeminiAiService(openRouterManager)
     private val swarmConnection = SwarmConnection(application)
 
-    val repository = AppRepository(db, systemInfoManager, ttsVoiceManager, geminiAiService, swarmConnection)
+    val nodeRegistry = NodeRegistry.get(application)
+    val repository = AppRepository(db, systemInfoManager, ttsVoiceManager, geminiAiService, swarmConnection, nodeRegistry)
     val heartbeat = CompanionHeartbeat(swarmConnection)
 
     val openRouterApiKey = openRouterManager.apiKey
@@ -53,14 +61,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         heartbeat.start(viewModelScope)
+        nodeRegistry.importLegacyConnectionOnce(swarmConnection)
         viewModelScope.launch {
-            repository.seedDefaultTailscaleDevicesIfEmpty()
+            repository.resetDeviceTelemetryOnLaunch()
+            // Keep a device row and (for agent / bridge nodes) a live stream per node.
+            nodeRegistry.nodes.collect { list ->
+                repository.syncDevicesFromNodes(list)
+                reconcileStreams(list)
+            }
+        }
+        viewModelScope.launch {
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                repository.refreshConfiguredNode()
+                // Poll nodes that have no live stream (LucyServer, or streams that are down).
+                val streaming = linkStates.value.filterValues { it == LinkState.Live }.keys
+                repository.refreshPolledNodes(nodeRegistry.nodes.value, streaming)
                 kotlinx.coroutines.delay(30_000)
             }
         }
     }
+
+    // ── Nodes ─────────────────────────────────────────────────────────────────
+    val nodes: StateFlow<List<Node>> = nodeRegistry.nodes
+
+    // ── Malware scanning per node (ClamAV through the node agent) ─────────────
+    internal val securityController = NodeSecurityController(viewModelScope)
+    val security: StateFlow<Map<String, NodeSecurity>> = securityController.state
+
+    private class Running(val node: Node, val stream: NodeStream, val collector: kotlinx.coroutines.Job, val stateJob: kotlinx.coroutines.Job)
+    private val running = HashMap<String, Running>()
+    private val _linkStates = MutableStateFlow<Map<String, LinkState>>(emptyMap())
+    /** Live-stream state per node id (absent = no stream wanted for that node). */
+    val linkStates: StateFlow<Map<String, LinkState>> = _linkStates
+
+    @Synchronized
+    private fun reconcileStreams(list: List<Node>) {
+        val wanted = list.filter { it.wantsLiveStream }.associateBy { it.id }
+        for ((id, r) in running.toMap()) {
+            val next = wanted[id]
+            // Restart when the node was removed, turned off, or its address/credentials changed.
+            if (next == null || next.host != r.node.host || next.port != r.node.port || next.token != r.node.token || next.backend != r.node.backend) {
+                r.stream.stop(); r.collector.cancel(); r.stateJob.cancel()
+                running.remove(id)
+                _linkStates.value = _linkStates.value - id
+            }
+        }
+        for ((id, node) in wanted) {
+            if (id in running) continue
+            val stream = NodeStream(node, viewModelScope)
+            val collector = viewModelScope.launch { stream.telemetry.collect { repository.applyLiveTelemetry(node, it) } }
+            val stateJob = viewModelScope.launch { stream.state.collect { s -> _linkStates.value = _linkStates.value + (id to s) } }
+            running[id] = Running(node, stream, collector, stateJob)
+            stream.start()
+        }
+    }
+
+    fun saveNode(node: Node, makePrimary: Boolean) {
+        nodeRegistry.upsert(node)
+        if (makePrimary) {
+            swarmConnection.host = node.host
+            swarmConnection.port = node.port
+            swarmConnection.authToken = node.token
+            com.example.data.memory.MemorySyncEngine.connectionChanged()
+            if (swarmConnection.hitlAlertsEnabled) com.example.data.hitl.HitlApprovalService.restart(getApplication())
+        }
+    }
+
+    fun deleteNode(node: Node) {
+        nodeRegistry.remove(node.id)
+        viewModelScope.launch { repository.removeDeviceForNode(node) }
+    }
+
+    /** Which node (if any) the terminal, Coder and shared memory currently use. */
+    fun isPrimary(node: Node): Boolean =
+        swarmConnection.isUsable && swarmConnection.host.equals(node.host, ignoreCase = true) && swarmConnection.port == node.port
 
     fun optimizeSingleDevice(deviceId: Long) {
         if (deviceId == -1L) { runSuperchargerOptimization(); return }
@@ -71,25 +144,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /// Runs the real antivirus scan (local package audit + remote LucyServer
-    /// scan) and reports what it actually found. This previously slept 1.8s and
-    /// then decided the verdict with `(1..10).random() > 2` — a coin flip that
-    /// told the user their device was infected, or clean, at random.
+    /// This phone: a settings audit, labelled as such (it inspects settings, not apps).
+    /// Any other device: reports whether that node can scan at all. Today none can,
+    /// so the answer is "no verdict". This previously slept 1.8s and then decided the
+    /// verdict with `(1..10).random() > 2`: a coin flip that told the user their
+    /// device was infected, or clean, at random.
     fun runMalwareScanOnDevice(deviceId: Long) {
         viewModelScope.launch {
             _isOptimizing.value = true
-            _avatarSpeech.value = "⚡ Scanning ${if (deviceId == -1L) "This Phone" else "device #$deviceId"} for malware, rogue processes, and suspicious permissions..."
             try {
-                val scan = repository.runAntivirusScan()
-                _avatarSpeech.value = if (scan.threatsFoundCount == 0) {
-                    "✅ Scan complete — no threats detected. ${scan.summaryMessage}"
+                if (deviceId == -1L) {
+                    _avatarSpeech.value = "⚡ Auditing this phone's security settings..."
+                    val scan = repository.runAntivirusScan()
+                    // The local audit looks at settings, not apps: say so instead of declaring the phone clean.
+                    _avatarSpeech.value = "Settings audit finished. This is not a malware scan, so there is no clean or infected verdict. ${scan.summaryMessage}"
                 } else {
-                    "⚠️ Scan found ${scan.threatsFoundCount} issue(s). ${scan.summaryMessage}"
+                    startRemoteScan(deviceId)
                 }
             } catch (e: Exception) {
-                _avatarSpeech.value = "Scan did not complete: ${e.message}. No verdict — treat this device as unknown."
+                _avatarSpeech.value = "Scan did not complete: ${e.message}. No verdict; treat this device as unknown."
             }
             _isOptimizing.value = false
+        }
+    }
+
+    /** The SCAN button on another device: starts a real quick scan on that node, or says why it cannot. */
+    private suspend fun startRemoteScan(deviceId: Long) {
+        val device = repository.allDevices.first().firstOrNull { it.id == deviceId }
+        val node = device?.let { nodeRegistry.findByHost(it.ipAddress) }
+        _avatarSpeech.value = when {
+            device == null -> "That device is no longer in the list."
+            node == null -> "${device.deviceName}: no node is set up for ${device.ipAddress}. No scan was run and there is no verdict."
+            !node.isConfigured -> "${node.name} is not paired yet. Pair it under Nodes first."
+            node.backend != NodeBackend.AGENT ->
+                "${node.name} runs ${node.backend.label}, which has no malware scanner. Install the I30LTZ node agent on it to scan it. No scan was run and there is no verdict."
+            else -> {
+                securityController.start(node, "quick")
+                _currentTab.value = NavigationTab.ANTIVIRUS
+                "Started a quick malware scan on ${node.name}. Progress and results are on the Security tab."
+            }
         }
     }
 

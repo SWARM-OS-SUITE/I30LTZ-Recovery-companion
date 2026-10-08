@@ -107,6 +107,9 @@ class MainActivity : FragmentActivity() {
                         val stats by viewModel.systemStats.collectAsStateWithLifecycle()
                     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
                     val devices by viewModel.devices.collectAsStateWithLifecycle()
+                    val nodes by viewModel.nodes.collectAsStateWithLifecycle()
+                    val security by viewModel.security.collectAsStateWithLifecycle()
+                    val linkStates by viewModel.linkStates.collectAsStateWithLifecycle()
                     val recentScans by viewModel.recentScans.collectAsStateWithLifecycle()
                     val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
                     val avatarSpeech by viewModel.avatarSpeech.collectAsStateWithLifecycle()
@@ -328,10 +331,31 @@ class MainActivity : FragmentActivity() {
                                         onRefreshStats = { viewModel.refreshSystemStats() },
                                         onSuperchargeClick = { viewModel.runSuperchargerOptimization() },
                                         onOptimizeDevice = { viewModel.optimizeSingleDevice(it) },
-                                        onMalwareScanDevice = { viewModel.runMalwareScanOnDevice(it) }
+                                        onMalwareScanDevice = { viewModel.runMalwareScanOnDevice(it) },
+                                        onManageNodes = { viewModel.selectTab(NavigationTab.NODES) }
+                                    )
+
+                                    NavigationTab.NODES -> NodesScreen(
+                                        nodes = nodes,
+                                        linkStates = linkStates,
+                                        isPrimary = { viewModel.isPrimary(it) },
+                                        onSave = { node, primary -> viewModel.saveNode(node, primary) },
+                                        onDelete = { viewModel.deleteNode(it) },
+                                        onBack = { viewModel.selectTab(NavigationTab.SYSTEM_MONITOR) }
                                     )
 
                                     NavigationTab.ANTIVIRUS -> AntivirusScreen(
+                                        nodes = nodes,
+                                        security = security,
+                                        actions = SecurityActions(
+                                            refresh = { viewModel.securityController.refresh(it) },
+                                            scan = { n, s, p -> viewModel.securityController.start(n, s, p) },
+                                            cancel = { viewModel.securityController.cancel(it) },
+                                            quarantine = { n, f -> viewModel.securityController.quarantine(n, f) },
+                                            restore = { n, q -> viewModel.securityController.restore(n, q) },
+                                            delete = { n, q -> viewModel.securityController.delete(n, q) },
+                                            scanAll = { viewModel.securityController.startAll(nodes.filter { it.backend == com.example.data.nodes.NodeBackend.AGENT && it.isConfigured }) },
+                                        ),
                                         threatScore = stats.threatScore,
                                         report = avatarSpeech.orEmpty(),
                                         isScanning = isOptimizing,
@@ -391,9 +415,15 @@ class MainActivity : FragmentActivity() {
                                         )
                                     }
 
-                                    NavigationTab.TERMINAL -> {
+                                    NavigationTab.TERMINAL -> NodeTerminalScreen(
+                                        nodes = nodes,
+                                        onBack = { viewModel.selectTab(NavigationTab.DASHBOARD) },
+                                        onAddNode = { viewModel.selectTab(NavigationTab.NODES) },
+                                        onLegacyShell = { viewModel.selectTab(NavigationTab.LEGACY_TERMINAL) }
+                                    )
+                                    NavigationTab.LEGACY_TERMINAL -> {
                                         InteractiveTerminalScreen(
-                                            onNavigateBack = { viewModel.selectTab(NavigationTab.DASHBOARD) },
+                                            onNavigateBack = { viewModel.selectTab(NavigationTab.TERMINAL) },
                                             onNavigateToCheatSheet = { viewModel.selectTab(NavigationTab.CHEAT_SHEET) }
                                         )
                                     }
@@ -418,6 +448,12 @@ class MainActivity : FragmentActivity() {
                                 val coroutineScope = rememberCoroutineScope()
                                 com.example.ui.screens.RemotePcScreen(
                                     onBack = {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(0)
+                                        }
+                                    },
+                                    onManageNodes = {
+                                        viewModel.selectTab(NavigationTab.NODES)
                                         coroutineScope.launch {
                                             pagerState.animateScrollToPage(0)
                                         }

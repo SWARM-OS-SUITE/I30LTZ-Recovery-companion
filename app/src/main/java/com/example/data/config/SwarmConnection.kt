@@ -20,7 +20,7 @@ class SwarmConnection(context: Context) {
         securePreferences(context.applicationContext, PREFS_NAME)
 
     var host: String
-        get() = prefs.getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
+        get() = prefs.getString(KEY_HOST, "") ?: ""
         set(value) = prefs.edit().putString(KEY_HOST, value.trim()).apply()
 
     var port: Int
@@ -28,7 +28,7 @@ class SwarmConnection(context: Context) {
         set(value) = prefs.edit().putInt(KEY_PORT, value).apply()
 
     var authToken: String
-        get() = prefs.getString(KEY_TOKEN, DEFAULT_TOKEN) ?: DEFAULT_TOKEN
+        get() = prefs.getString(KEY_TOKEN, "") ?: ""
         set(value) = prefs.edit().putString(KEY_TOKEN, value.trim()).apply()
 
     /** lucille-core companion socket (HITL approvals); same host and token. */
@@ -63,12 +63,12 @@ class SwarmConnection(context: Context) {
         val target = "$host:$port"
         return when {
             httpCode == 401 || httpCode == 403 ->
-                "LucyServer at $target rejected the auth token. Save CachyOS’s configured access token under Remote PC → CHANGE NODE."
+                "LucyServer at $target rejected the auth token. Save this node’s access token under Nodes."
             t is ConnectException && t.message.orEmpty().contains("ECONNREFUSED") ->
-                "Reached $host, but nothing is listening on port $port. Start LucyServer on CachyOS, and make sure it listens on its Tailscale address, not only 127.0.0.1."
+                "Reached $host, but nothing is listening on port $port. Start the service on that node, and make sure it listens on its Tailscale address, not only 127.0.0.1."
             t is SocketTimeoutException || t is NoRouteToHostException || t?.message.orEmpty().contains("timeout", ignoreCase = true) ->
-                "No route to $target. Turn on Tailscale on this phone, and check that CachyOS is online (tailscale status)."
-            t is UnknownHostException -> "Can't resolve \"$host\". Use CachyOS's Tailscale IP, e.g. $DEFAULT_HOST."
+                "No route to $target. Turn on Tailscale on this phone, and check that the node is online (tailscale status)."
+            t is UnknownHostException -> "Can't resolve \"$host\". Use the node's Tailscale IP (100.x.y.z)."
             httpCode != null -> "LucyServer at $target answered HTTP $httpCode."
             else -> "Connection to $target failed: ${t?.message ?: "unknown error"}"
         }
@@ -83,14 +83,8 @@ class SwarmConnection(context: Context) {
         private const val KEY_HITL_ENABLED = "hitl_enabled"
         const val DEFAULT_HITL_PORT = 9091
 
-        // Matches LucyServer-go's swarmAuthMiddleware fallback (main.go),
-        // used whenever SWARM_AUTH_TOKEN isn't set in the environment —
-        // which is the case on this drive's /20-runtime/.env today.
-        // CachyOS (CachyOS daily driver, renamed from LUCILLE
-        // 2026-09-19) as of 2026-09-16 (`tailscale status`). SWARM OS on
-        // the same machine is 100.82.1.20 — switch under Remote PC → CHANGE NODE.
-        const val DEFAULT_HOST = "100.82.1.19"
+        // No default host or token on purpose: a token compiled into the app is
+        // public to anyone who has the APK. Nodes are added (and paired) under Nodes.
         const val DEFAULT_PORT = 5000
-        const val DEFAULT_TOKEN = "swarm-token-2026"
     }
 }

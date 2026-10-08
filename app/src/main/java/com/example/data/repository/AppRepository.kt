@@ -2,6 +2,10 @@ package com.example.data.repository
 
 import com.example.data.config.SwarmConnection
 import com.example.data.db.*
+import com.example.data.nodes.Node
+import com.example.data.nodes.NodeBackend
+import com.example.data.nodes.NodeClient
+import com.example.data.nodes.NodeRegistry
 import com.example.data.service.GeminiAiService
 import com.example.data.service.SystemInfoManager
 import com.example.data.service.SystemStats
@@ -16,7 +20,8 @@ class AppRepository(
     private val systemInfoManager: SystemInfoManager,
     private val ttsVoiceManager: TtsVoiceManager,
     private val geminiAiService: GeminiAiService,
-    private val swarmConnection: SwarmConnection
+    private val swarmConnection: SwarmConnection,
+    private val nodeRegistry: NodeRegistry
 ) {
     // Tasks
     val allTasks: Flow<List<TaskEntity>> = database.taskDao().getAllTasks()
@@ -45,29 +50,51 @@ class AppRepository(
     // Device Sync & Tailscale Fleet
     val allDevices: Flow<List<DeviceSyncEntity>> = database.deviceSyncDao().getAllDevices()
 
-    /// Seeds the two known Tailscale nodes with identity only — name, type and
-    /// address. No telemetry and no "Connected & Secure" claim: those were
-    /// hardcoded (cpu 18/29%, ram 38/54%, 512/1024GB, 9/14ms ping) and shown as
-    /// if measured, for nodes that had never been contacted. Real numbers
-    /// arrive when refreshDeviceTelemetry() actually reaches the node.
-    suspend fun seedDefaultTailscaleDevicesIfEmpty() {
+    /// Rows are a cache of what each node last reported, so nothing measured in a
+    /// previous session may be shown as current. Real numbers arrive when a node
+    /// answers (live stream or poll). Devices come from the node list, not from
+    /// built-in addresses.
+    suspend fun resetDeviceTelemetryOnLaunch() {
         val dao = database.deviceSyncDao()
-        val devices = dao.getAllDevices().first()
-        // Migrate only the two exact old seeded rows, preserving user-added devices.
-        for (device in devices) {
+        for (device in dao.getAllDevices().first()) {
             dao.updateDevice(device.copy(isConnected = false, cpuLoadPercent = -1, ramLoadPercent = -1,
                 storageAvailableGb = -1, syncStatus = "Awaiting fresh measurement"))
-            val replacement = when {
-                device.deviceName == "a17 (Tailscale Workstation)" && device.ipAddress == "100.105.12.17" -> "CachyOS" to swarmConnection.host
-                device.deviceName == "a16 (Tailscale Server)" && device.ipAddress == "100.105.12.16" -> "SWARM OS" to "100.82.1.20"
-                else -> null
-            }
-            replacement?.let { (name, ip) -> dao.updateDevice(device.copy(deviceName=name, ipAddress=ip, isConnected=false, lastSyncTime=0, syncStatus="Address updated; refresh to test")) }
         }
-        if(devices.isEmpty()) {
-            for ((name,ip) in listOf("CachyOS" to swarmConnection.host, "SWARM OS" to "100.82.1.20")) {
-                dao.insertDevice(DeviceSyncEntity(deviceName=name, deviceType="PC", connectionType="Tailscale", ipAddress=ip, isConnected=false, lastSyncTime=0, syncStatus="Not tested"))
+    }
+
+    /// Makes sure every node has a device row (matched by address) with its current name.
+    suspend fun syncDevicesFromNodes(nodes: List<Node>) {
+        val dao = database.deviceSyncDao()
+        val rows = dao.getAllDevices().first()
+        for (node in nodes) {
+            val row = rows.firstOrNull { it.ipAddress.equals(node.host, ignoreCase = true) }
+            if (row == null) {
+                dao.insertDevice(DeviceSyncEntity(deviceName = node.name, deviceType = node.os.ifBlank { "PC" },
+                    connectionType = node.backend.label, ipAddress = node.host, isConnected = false,
+                    lastSyncTime = 0, syncStatus = "Not tested"))
+            } else if (row.deviceName != node.name || row.connectionType != node.backend.label) {
+                dao.updateDevice(row.copy(deviceName = node.name, connectionType = node.backend.label))
             }
+        }
+    }
+
+    suspend fun removeDeviceForNode(node: Node) = database.deviceSyncDao().deleteByIp(node.host)
+
+    /// Applies one live (SSE) update to the node's row. Storage is kept when the update does not carry it.
+    internal suspend fun applyLiveTelemetry(node: Node, stats: RemoteTelemetry) {
+        val dao = database.deviceSyncDao()
+        val row = dao.getAllDevices().first().firstOrNull { it.ipAddress.equals(node.host, ignoreCase = true) } ?: return
+        dao.updateDevice(row.copy(isConnected = true, lastSyncTime = System.currentTimeMillis(),
+            syncStatus = "Live (SSE)", cpuLoadPercent = stats.cpu, ramLoadPercent = stats.ram,
+            storageAvailableGb = if (stats.storage >= 0) stats.storage else row.storageAvailableGb))
+    }
+
+    /// Polls every configured node that is not already streaming live.
+    suspend fun refreshPolledNodes(nodes: List<Node>, streamingNodeIds: Set<String>) {
+        val rows = database.deviceSyncDao().getAllDevices().first()
+        for (node in nodes) {
+            if (!node.isConfigured || node.id in streamingNodeIds) continue
+            rows.firstOrNull { it.ipAddress.equals(node.host, ignoreCase = true) }?.let { refreshDeviceTelemetry(it) }
         }
     }
 
@@ -76,19 +103,27 @@ class AppRepository(
     suspend fun refreshDeviceTelemetry(device: DeviceSyncEntity): Boolean =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val request = okhttp3.Request.Builder()
-                    .url("http://${device.ipAddress}:${swarmConnection.port}/api/system/stats")
-                    .header("X-Swarm-Auth", swarmConnection.authToken).build()
+                val node = nodeRegistry.findByHost(device.ipAddress)
                 val started = System.nanoTime()
-                telemetryClient.newCall(request).execute().use { response ->
-                    check(response.isSuccessful) { "HTTP ${response.code}" }
-                    val stats = RemoteTelemetry.parse(org.json.JSONObject(response.body?.string().orEmpty()))
-                    database.deviceSyncDao().updateDevice(device.copy(
-                        isConnected = true, lastSyncTime = System.currentTimeMillis(),
-                        syncStatus = "Telemetry received", cpuLoadPercent = stats.cpu,
-                        ramLoadPercent = stats.ram, storageAvailableGb = stats.storage,
-                        pingMs = ((System.nanoTime() - started) / 1_000_000).toInt()))
+                val stats = if (node != null) {
+                    check(node.isConfigured) { "${node.name} has no token yet. Pair it under Nodes." }
+                    NodeClient.telemetry(node)
+                } else {
+                    // A device added before the node list existed: use the single saved connection.
+                    check(swarmConnection.isUsable) { "No node is set up for ${device.ipAddress}. Add it under Nodes." }
+                    val request = okhttp3.Request.Builder()
+                        .url("http://${device.ipAddress}:${swarmConnection.port}/api/system/stats")
+                        .header("X-Swarm-Auth", swarmConnection.authToken).build()
+                    telemetryClient.newCall(request).execute().use { response ->
+                        check(response.isSuccessful) { "HTTP ${response.code}" }
+                        RemoteTelemetry.parse(org.json.JSONObject(response.body?.string().orEmpty()))
+                    }
                 }
+                database.deviceSyncDao().updateDevice(device.copy(
+                    isConnected = true, lastSyncTime = System.currentTimeMillis(),
+                    syncStatus = "Telemetry received", cpuLoadPercent = stats.cpu,
+                    ramLoadPercent = stats.ram, storageAvailableGb = stats.storage,
+                    pingMs = ((System.nanoTime() - started) / 1_000_000).toInt()))
                 true
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -101,17 +136,6 @@ class AppRepository(
 
     private val telemetryClient = okhttp3.OkHttpClient.Builder()
         .callTimeout(12, java.util.concurrent.TimeUnit.SECONDS).build()
-
-    suspend fun refreshConfiguredNode() {
-        val dao = database.deviceSyncDao()
-        val rows = dao.getAllDevices().first()
-        val selected = rows.firstOrNull { it.ipAddress == swarmConnection.host }
-            ?: DeviceSyncEntity(deviceName = swarmConnection.host, deviceType = "PC", connectionType = "Configured computer",
-                ipAddress = swarmConnection.host, isConnected = false, lastSyncTime = 0, syncStatus = "Not tested").let {
-                    it.copy(id = dao.insertDevice(it))
-                }
-        refreshDeviceTelemetry(selected)
-    }
 
     suspend fun addOrUpdateDevice(device: DeviceSyncEntity) {
         database.deviceSyncDao().insertDevice(device)

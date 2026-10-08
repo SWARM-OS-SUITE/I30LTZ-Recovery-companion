@@ -445,6 +445,10 @@ private fun CdrInlineTerminal(modifier: Modifier = Modifier) {
     }
 
     DisposableEffect(connection.host, connection.port) {
+        if (!connection.isUsable) {
+            append("No node configured. Add one under Nodes (Monitor tab).")
+            return@DisposableEffect onDispose { }
+        }
         val client = connection.terminalClient()
         val request = Request.Builder()
             .url("${connection.wsBase()}/api/terminal/ws")

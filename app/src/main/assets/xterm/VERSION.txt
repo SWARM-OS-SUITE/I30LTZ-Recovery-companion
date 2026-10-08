@@ -1,0 +1,4 @@
+@xterm/xterm 5.5.0 (MIT, see LICENSE)  integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==
+@xterm/addon-fit 0.10.0 (MIT)  integrity: sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==
+Files copied unmodified from the npm tarballs (lib/xterm.js, css/xterm.css, lib/addon-fit.js).
+terminal.html is ours. The page never loads anything from the network.

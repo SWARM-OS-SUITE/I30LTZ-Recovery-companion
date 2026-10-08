@@ -35,7 +35,10 @@ class AndroidToolsViewModel(app: Application) : AndroidViewModel(app) {
     val state = MutableStateFlow(AndroidToolsState())
     private val connection = SwarmConnection(app)
     private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(150, TimeUnit.SECONDS).writeTimeout(150, TimeUnit.SECONDS).build()
-    private fun request(path: String) = Request.Builder().url(connection.httpBase() + "/api/android/" + path).header("X-Swarm-Auth", connection.authToken)
+    private fun request(path: String): Request.Builder {
+        require(connection.isUsable) { "No node configured. Add one under Nodes (Monitor tab)." }
+        return Request.Builder().url(connection.httpBase() + "/api/android/" + path).header("X-Swarm-Auth", connection.authToken)
+    }
     private fun json(path: String, body: RequestBody? = null): JSONObject {
         val req = request(path).apply { if (body != null) post(body) }.build()
         return client.newCall(req).execute().use { response ->
