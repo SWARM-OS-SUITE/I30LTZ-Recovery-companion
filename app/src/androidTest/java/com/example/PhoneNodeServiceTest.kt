@@ -20,6 +20,7 @@ import com.example.ui.screens.PhoneNodeCard
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -35,6 +36,11 @@ class PhoneNodeServiceTest {
     @get:Rule val compose = createComposeRule()
     private val app get() = ApplicationProvider.getApplicationContext<Application>()
     private val instr get() = InstrumentationRegistry.getInstrumentation()
+
+    /** Without this the foreground notification is blocked on Android 13+, and the test would depend on what an earlier run left on the device. */
+    @Before fun allowNotifications() {
+        instr.uiAutomation.grantRuntimePermission(app.packageName, "android.permission.POST_NOTIFICATIONS")
+    }
 
     @After fun off() {
         runCatching { PhoneNode.setEnabled(app, false) }

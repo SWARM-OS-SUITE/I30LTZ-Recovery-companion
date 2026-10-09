@@ -37,6 +37,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val heartbeat = CompanionHeartbeat(swarmConnection)
 
     val openRouterApiKey = openRouterManager.apiKey
+
+    // ── Dr. Boltz's realistic voice (ElevenLabs through OpenRouter) ──
+    val voiceEnabled = openRouterManager.voiceEnabled
+    val voiceName = openRouterManager.voiceName
+    val voiceModel = openRouterManager.voiceModel
+    val voiceStatus = ttsVoiceManager.voiceStatus
+    private val _voiceCheck = MutableStateFlow("")
+    val voiceCheck: StateFlow<String> = _voiceCheck
+
+    /** Returns null on success, otherwise what to tell the person. */
+    fun saveVoice(enabled: Boolean, name: String, model: String): String? =
+        try { openRouterManager.saveVoice(enabled, name, model); null } catch (e: IllegalArgumentException) { e.message } catch (e: IllegalStateException) { e.message }
+
+    fun testVoice() = ttsVoiceManager.speak(
+        "I am Doctor Boltz. Your systems are in order, and I shall keep watching over them.", ignoreMute = true)
+
+    /** Asks OpenRouter (no key, no text sent) whether the voice is still on offer for this model. */
+    fun checkVoice(model: String, name: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _voiceCheck.value = "Checking OpenRouter's voice list…"
+            val list = com.example.data.service.OpenRouterVoice().supportedVoices(model)
+            _voiceCheck.value = when {
+                list == null -> "Could not read OpenRouter's voice list right now."
+                name.trim().lowercase() in list -> "OpenRouter still lists '${name.trim().lowercase()}' for this model."
+                else -> "OpenRouter no longer lists '${name.trim().lowercase()}' for this model. Try one of: ${list.take(12).joinToString()}"
+            }
+        }
+    }
     val selectedOpenRouterModel = openRouterManager.selectedModel
 
     fun saveOpenRouterApiKey(key: String) {

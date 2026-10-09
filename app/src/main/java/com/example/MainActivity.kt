@@ -365,6 +365,11 @@ class MainActivity : FragmentActivity() {
                                     NavigationTab.AI_LAB -> {
                                         val openRouterApiKey by viewModel.openRouterApiKey.collectAsStateWithLifecycle()
                                         val selectedOpenRouterModel by viewModel.selectedOpenRouterModel.collectAsStateWithLifecycle()
+                                        val voiceEnabled by viewModel.voiceEnabled.collectAsStateWithLifecycle()
+                                        val voiceName by viewModel.voiceName.collectAsStateWithLifecycle()
+                                        val voiceModel by viewModel.voiceModel.collectAsStateWithLifecycle()
+                                        val voiceStatus by viewModel.voiceStatus.collectAsStateWithLifecycle()
+                                        val voiceCheck by viewModel.voiceCheck.collectAsStateWithLifecycle()
 
                                         AiLabScreen(
                                             chatMessages = chatMessages,
@@ -376,7 +381,12 @@ class MainActivity : FragmentActivity() {
                                             onToggleMute = { viewModel.toggleMuteVoice() },
                                             onSaveOpenRouterKey = { viewModel.saveOpenRouterApiKey(it) },
                                             onSaveOpenRouterModel = { viewModel.saveOpenRouterModel(it) },
-                                            onClearOpenRouterKey = { viewModel.clearOpenRouterApiKey() }
+                                            onClearOpenRouterKey = { viewModel.clearOpenRouterApiKey() },
+                                            voiceEnabled = voiceEnabled, voiceName = voiceName, voiceModel = voiceModel,
+                                            voiceStatus = voiceStatus, voiceCheck = voiceCheck,
+                                            onSaveVoice = { e, n, m -> viewModel.saveVoice(e, n, m) },
+                                            onTestVoice = { viewModel.testVoice() },
+                                            onCheckVoice = { m, n -> viewModel.checkVoice(m, n) }
                                         )
                                     }
 

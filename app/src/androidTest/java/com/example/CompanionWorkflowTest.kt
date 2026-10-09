@@ -12,6 +12,8 @@ import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import com.example.ui.coderdroid.*
 import com.example.data.config.SwarmConnection
+import com.example.data.phonenode.HttpError
+import com.example.data.phonenode.MiniHttp
 import com.example.data.service.LocalLlamaEngine
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -19,7 +21,10 @@ import okhttp3.Request
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
+import java.io.BufferedInputStream
 import java.io.File
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
@@ -51,10 +56,42 @@ class CompanionWorkflowTest {
         compose.waitUntil(10000) { changed.get().contains("phone edit") }
         file.delete()
     }
+    /**
+     * The app ships with no host and no token (they used to be built in). It must use exactly what was saved.
+     * A local stand-in for LucyServer keeps the test from needing any real machine or secret.
+     */
     @Test fun connectionUsesSavedCredentialsAndRealHost() {
+        val server=ServerSocket(0,10,InetAddress.getByName("127.0.0.1"))
+        val seen=java.util.concurrent.CopyOnWriteArrayList<String>()
+        Thread {
+            while(!server.isClosed) {
+                val s=try { server.accept() } catch(e: Exception) { return@Thread }
+                Thread { s.use {
+                    try {
+                        val req=MiniHttp.readRequest(BufferedInputStream(s.getInputStream()))
+                        val token=req.headers["x-swarm-auth"].orEmpty(); seen+=req.path+" "+token
+                        if(token=="saved-test-token") MiniHttp.writeJson(s.getOutputStream(),200,"""{"sdkAvailable":true}""")
+                        else MiniHttp.writeJson(s.getOutputStream(),401,"""{"error":"no"}""")
+                    } catch(_: HttpError) {} catch(_: java.io.IOException) {}
+                } }.start()
+            }
+        }.apply { isDaemon=true; start() }
         val c=SwarmConnection(app)
-        val request=Request.Builder().url(c.httpBase()+"/api/android/capabilities").header("X-Swarm-Auth",c.authToken).build()
-        OkHttpClient().newCall(request).execute().use { assertEquals(200,it.code); assertTrue(it.body!!.string().contains("sdkAvailable")) }
+        val (oldHost,oldPort,oldToken)=Triple(c.host,c.port,c.authToken)
+        try {
+            c.host=""; c.authToken=""
+            assertFalse("a fresh install must not carry a built-in host or token",c.isUsable)
+            c.host="127.0.0.1"; c.port=server.localPort; c.authToken="saved-test-token"
+            assertTrue(c.isUsable)
+            val http=OkHttpClient()
+            fun get(token: String)=http.newCall(Request.Builder().url(c.httpBase()+"/api/android/capabilities").header("X-Swarm-Auth",token).build()).execute()
+            get(c.authToken).use { assertEquals(200,it.code); assertTrue(it.body!!.string().contains("sdkAvailable")) }
+            get("some-other-token").use { assertEquals("the server really checks the token",401,it.code) }
+            assertTrue(seen.toString(),seen.contains("/api/android/capabilities saved-test-token"))
+        } finally {
+            server.close()
+            c.host=oldHost; c.port=oldPort; c.authToken=oldToken
+        }
     }
     @Test fun unavailableOfflineModelDoesNotInventSuccess() = runBlocking {
         val engine=LocalLlamaEngine()

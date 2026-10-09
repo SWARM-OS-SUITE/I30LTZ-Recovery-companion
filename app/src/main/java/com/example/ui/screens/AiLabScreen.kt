@@ -42,7 +42,15 @@ fun AiLabScreen(
     onToggleMute: () -> Unit,
     onSaveOpenRouterKey: (String) -> Unit = {},
     onSaveOpenRouterModel: (String) -> Unit = {},
-    onClearOpenRouterKey: () -> Unit = {}
+    onClearOpenRouterKey: () -> Unit = {},
+    voiceEnabled: Boolean = false,
+    voiceName: String = OpenRouterManager.DEFAULT_VOICE,
+    voiceModel: String = OpenRouterManager.DEFAULT_VOICE_MODEL,
+    voiceStatus: String = "",
+    voiceCheck: String = "",
+    onSaveVoice: (Boolean, String, String) -> String? = { _, _, _ -> null },
+    onTestVoice: () -> Unit = {},
+    onCheckVoice: (String, String) -> Unit = { _, _ -> },
 ) {
     var inputText by remember { mutableStateOf("") }
     var isConfigExpanded by remember { mutableStateOf(openRouterApiKey.isBlank()) }
@@ -321,6 +329,11 @@ fun AiLabScreen(
                 }
             }
         }
+
+        VoiceSettingsCard(
+            hasKey = openRouterApiKey.isNotBlank(), enabled = voiceEnabled, name = voiceName, model = voiceModel,
+            status = voiceStatus, check = voiceCheck, onSave = onSaveVoice, onTest = onTestVoice, onCheck = onCheckVoice,
+        )
 
         // Quick Prompt Chips
         LazyRow(
