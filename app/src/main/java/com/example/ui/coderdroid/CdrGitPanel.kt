@@ -36,6 +36,9 @@ fun CdrGitPanel(
     authorName: String,
     authorEmail: String,
     commitSequence: Int,
+    prInProgress: Boolean = false,
+    prUrl: String? = null,
+    prError: String? = null,
     modifier: Modifier = Modifier,
     onRefresh: () -> Unit,
     onStage: (String) -> Unit,
@@ -45,7 +48,9 @@ fun CdrGitPanel(
     onPush: () -> Unit,
     onSetOrigin: (String) -> Unit,
     onPull: () -> Unit,
-    onSaveCredentials: (String, String, String, String) -> Unit
+    onSaveCredentials: (String, String, String, String) -> Unit,
+    onOpenPullRequest: (title: String, base: String, body: String) -> Unit = { _, _, _ -> },
+    onDismissPrResult: () -> Unit = {}
 ) {
     var commitMessage by remember { mutableStateOf("") }
     LaunchedEffect(commitSequence) { if (commitSequence > 0) commitMessage = "" }
@@ -53,6 +58,17 @@ fun CdrGitPanel(
     var remoteUrl by remember { mutableStateOf("") }
     if(showOrigin) AlertDialog(onDismissRequest = {showOrigin=false}, title={Text("GitHub repository")}, text={OutlinedTextField(remoteUrl,{remoteUrl=it},label={Text("https://github.com/owner/repo.git")})}, confirmButton={TextButton(onClick={onSetOrigin(remoteUrl);showOrigin=false}){Text("Set origin")}}, dismissButton={TextButton(onClick={showOrigin=false}){Text("Cancel")}})
     var showCredentialsDialog by remember { mutableStateOf(false) }
+    var showPrDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(prUrl) { if (prUrl != null) showPrDialog = false }
+
+    if (showPrDialog) {
+        CdrPullRequestDialog(
+            branch = gitState.branch,
+            inProgress = prInProgress,
+            onDismiss = { showPrDialog = false },
+            onCreate = onOpenPullRequest
+        )
+    }
 
     if (showCredentialsDialog) {
         CdrGitCredentialsDialog(
@@ -92,6 +108,7 @@ fun CdrGitPanel(
                 }
                 CdrGitIconButton(Icons.Default.CloudDownload, "Pull", ElectricCyan, enabled = gitState.isRepo && !gitState.isBusy) { onPull() }
                 CdrGitIconButton(Icons.Default.CloudUpload, "Push", ElectricCyan, enabled = gitState.isRepo && !gitState.isBusy) { onPush() }
+                CdrGitIconButton(Icons.Default.CallMerge, "Open pull request", ElectricCyan, enabled = gitState.isRepo && hasCredentials && !prInProgress) { showPrDialog = true }
                 CdrGitIconButton(Icons.Default.Refresh, "Refresh", TextSecondary, enabled = !gitState.isBusy) { onRefresh() }
             }
         }
@@ -111,6 +128,28 @@ fun CdrGitPanel(
                 fontSize = 10.sp,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)
             )
+        }
+        prError?.let { err ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("⚠ Pull request: $err", color = Color(0xFFFF6B6B), fontSize = 10.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismissPrResult, modifier = Modifier.size(20.dp)) {
+                    Icon(Icons.Default.Close, "Dismiss", tint = TextMuted, modifier = Modifier.size(12.dp))
+                }
+            }
+        }
+        prUrl?.let { url ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("✓ Pull request opened: $url", color = NeonGreen, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                IconButton(onClick = onDismissPrResult, modifier = Modifier.size(20.dp)) {
+                    Icon(Icons.Default.Close, "Dismiss", tint = TextMuted, modifier = Modifier.size(12.dp))
+                }
+            }
         }
 
         if (!gitState.isRepo) {
@@ -264,6 +303,42 @@ private fun CdrGitIconButton(
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(28.dp)) {
         Icon(icon, desc, tint = if (enabled) tint else TextMuted.copy(alpha = 0.4f), modifier = Modifier.size(15.dp))
     }
+}
+
+@Composable
+private fun CdrPullRequestDialog(
+    branch: String,
+    inProgress: Boolean,
+    onDismiss: () -> Unit,
+    onCreate: (title: String, base: String, body: String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var base by remember { mutableStateOf("main") }
+    var body by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = { if (!inProgress) onDismiss() },
+        containerColor = CarbonSurface,
+        title = { Text("Open pull request", color = Color.White, fontSize = 14.sp) },
+        text = {
+            Column {
+                Text("From \"$branch\" into:", color = TextMuted, fontSize = 11.sp)
+                OutlinedTextField(value = base, onValueChange = { base = it }, label = { Text("Base branch") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = body, onValueChange = { body = it }, label = { Text("Description (optional)") }, minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onCreate(title, base, body) }, enabled = !inProgress && title.isNotBlank() && base.isNotBlank()) {
+                Text(if (inProgress) "Opening…" else "Create", color = ElectricCyan)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !inProgress) { Text("Cancel", color = TextMuted) }
+        }
+    )
 }
 
 @Composable

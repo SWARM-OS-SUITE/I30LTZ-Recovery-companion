@@ -198,6 +198,7 @@ fun CoderDroidScreen(
                         gitState       = state.gitState,
                         hasCredentials = state.gitHasCredentials,
                         username = state.gitUsername, authorName = state.gitAuthorName, authorEmail = state.gitAuthorEmail, commitSequence = state.commitSequence,
+                        prInProgress = state.prInProgress, prUrl = state.prUrl, prError = state.prError,
                         modifier       = Modifier.fillMaxWidth().fillMaxHeight(),
                         onRefresh      = { viewModel.onEvent(CoderDroidEvent.RefreshGit) },
                         onStage        = { viewModel.onEvent(CoderDroidEvent.StageFile(it)) },
@@ -207,7 +208,9 @@ fun CoderDroidScreen(
                         onSetOrigin = { viewModel.onEvent(CoderDroidEvent.SetOrigin(it)) },
                         onPush         = { viewModel.onEvent(CoderDroidEvent.Push) },
                         onPull         = { viewModel.onEvent(CoderDroidEvent.Pull) },
-                        onSaveCredentials = { u, t, n, e -> viewModel.onEvent(CoderDroidEvent.SetGitCredentials(u, t, n, e)) }
+                        onSaveCredentials = { u, t, n, e -> viewModel.onEvent(CoderDroidEvent.SetGitCredentials(u, t, n, e)) },
+                        onOpenPullRequest = { title, base, body -> viewModel.onEvent(CoderDroidEvent.OpenPullRequest(title, base, body)) },
+                        onDismissPrResult = { viewModel.onEvent(CoderDroidEvent.DismissPrResult) }
                     )
                 } else {
                     CdrFileTreePanel(

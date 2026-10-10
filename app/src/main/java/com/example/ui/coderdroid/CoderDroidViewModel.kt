@@ -29,7 +29,10 @@ data class CoderDroidState(
     val notice: String? = null,
     val savedSequence: Int = 0,
     val commitSequence: Int = 0,
-    val drafts: Map<String, String> = emptyMap()
+    val drafts: Map<String, String> = emptyMap(),
+    val prInProgress: Boolean = false,
+    val prUrl: String? = null,
+    val prError: String? = null
 )
 
 sealed class CoderDroidEvent {
@@ -57,6 +60,8 @@ sealed class CoderDroidEvent {
     data class SetGitCredentials(val username: String, val token: String, val authorName: String, val authorEmail: String) : CoderDroidEvent()
     data class CloneRepo(val url: String) : CoderDroidEvent()
     object DismissCloneError : CoderDroidEvent()
+    data class OpenPullRequest(val title: String, val base: String, val body: String) : CoderDroidEvent()
+    object DismissPrResult : CoderDroidEvent()
 }
 
 class CoderDroidViewModel(application: Application) : AndroidViewModel(application) {
@@ -99,6 +104,8 @@ class CoderDroidViewModel(application: Application) : AndroidViewModel(applicati
             is CoderDroidEvent.SetGitCredentials -> setGitCredentials(event.username, event.token, event.authorName, event.authorEmail)
             is CoderDroidEvent.CloneRepo        -> cloneRepo(event.url)
             CoderDroidEvent.DismissCloneError   -> _state.update { it.copy(cloneError = null) }
+            is CoderDroidEvent.OpenPullRequest  -> openPullRequest(event.title, event.base, event.body)
+            CoderDroidEvent.DismissPrResult     -> _state.update { it.copy(prUrl = null, prError = null) }
         }
     }
 
@@ -212,6 +219,30 @@ class CoderDroidViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun pull() = withGitCredentials { root, username, token ->
         CdrGitService.pull(root, username, token)
+    }
+
+    /**
+     * Opens a pull request via GitHub's REST API (not JGit — plain git has no concept
+     * of one). Separate busy/result state from [CdrGitState] since this never mutates
+     * the local repo and a failure here shouldn't look like a git-status error.
+     */
+    private fun openPullRequest(title: String, base: String, body: String) {
+        val root = _state.value.workspaceRoot ?: return
+        if (_state.value.prInProgress) return
+        val token = gitCredentials.token
+        if (token.isBlank()) {
+            _state.update { it.copy(prError = "No GitHub token set — tap the key icon in the Git panel") }
+            return
+        }
+        _state.update { it.copy(prInProgress = true, prError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = CdrGitHubApi.create(root, token, base, title, body)
+            if (_state.value.workspaceRoot != root) return@launch
+            result.fold(
+                onSuccess = { pr -> _state.update { it.copy(prInProgress = false, prUrl = pr.url) } },
+                onFailure = { err -> _state.update { it.copy(prInProgress = false, prError = err.message ?: "could not open the pull request") } }
+            )
+        }
     }
 
     /**
