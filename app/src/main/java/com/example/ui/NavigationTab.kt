@@ -14,5 +14,6 @@ enum class NavigationTab {
     MEMORY,
     NODES,
     LEGACY_TERMINAL,
-    RECOVERY_AI
+    RECOVERY_AI,
+    KOREENA
 }

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.koreena.toAnnotatedString
 import com.example.ui.theme.*
 
 data class CheatCommand(
@@ -51,7 +52,8 @@ val emergencyCommands = listOf(
 
 @Composable
 fun CheatSheetScreen(
-    onNavigateBack: () -> Unit = {}
+    onNavigateBack: () -> Unit = {},
+    onAskKoreena: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var selectedCategory by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("ALL") }
@@ -146,7 +148,7 @@ fun CheatSheetScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(filteredCommands) { cmd ->
-                CommandCard(cmd, onCopy = { copyToClipboard(cmd.command) })
+                CommandCard(cmd, onCopy = { copyToClipboard(cmd.command) }, onAskKoreena = onAskKoreena?.let { ask -> { ask(cmd.command) } })
             }
             item {
                 Spacer(modifier = Modifier.height(80.dp)) // padding for bottom nav
@@ -156,7 +158,7 @@ fun CheatSheetScreen(
 }
 
 @Composable
-fun CommandCard(cmd: CheatCommand, onCopy: () -> Unit) {
+fun CommandCard(cmd: CheatCommand, onCopy: () -> Unit, onAskKoreena: (() -> Unit)? = null) {
     Surface(
         color = CarbonSurface,
         shape = RoundedCornerShape(12.dp),
@@ -211,9 +213,13 @@ fun CommandCard(cmd: CheatCommand, onCopy: () -> Unit) {
                     .padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Same colours as Miss Koreena's reader: ALL CAPS amber, danger red.
                 Text(
-                    text = "$ ${cmd.command}",
-                    color = NvidiaGreen,
+                    text = androidx.compose.ui.text.buildAnnotatedString {
+                        append("$ ")
+                        append(com.example.data.koreena.CommandReader.read(cmd.command).toAnnotatedString())
+                    },
+                    color = com.example.ui.koreena.CommandColors.PlainText,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     modifier = Modifier.weight(1f)
@@ -224,6 +230,11 @@ fun CommandCard(cmd: CheatCommand, onCopy: () -> Unit) {
                     tint = TextMuted,
                     modifier = Modifier.size(16.dp)
                 )
+            }
+            if (onAskKoreena != null) {
+                androidx.compose.material3.TextButton(onClick = onAskKoreena) {
+                    Text("Ask Miss Koreena what this means", color = Color(0xFF2DD4BF), fontSize = 11.sp)
+                }
             }
         }
     }

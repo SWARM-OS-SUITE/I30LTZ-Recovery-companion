@@ -127,7 +127,7 @@ class OfflineLlm private constructor(
     fun chat(system: String, history: List<ChatTurn>, user: String): Flow<String> = flow {
         val model = loadedModel ?: throw IllegalStateException(UNAVAILABLE)
         val eng = engine ?: throw IllegalStateException(UNAVAILABLE)
-        if (!generateLock.tryLock()) throw IllegalStateException("Boltz is still answering the last message.")
+        if (!generateLock.tryLock()) throw IllegalStateException("The offline AI is still writing the last answer (Dr. Boltz and Miss Koreena share it). Wait a moment, or press Stop.")
         idleJob?.cancel()
         var conv: Conversation? = null
         try {

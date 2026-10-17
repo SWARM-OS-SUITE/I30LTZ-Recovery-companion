@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.BridgeViewModel
+import com.example.ui.KoreenaViewModel
 import com.example.ui.MainViewModel
 import com.example.ui.NavigationTab
 import com.example.ui.components.CarbonBackgroundCanvas
@@ -40,6 +41,15 @@ class MainActivity : FragmentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
     private val bridgeViewModel: BridgeViewModel by viewModels()
+    private val koreenaViewModel: KoreenaViewModel by viewModels()
+
+    /** The Miss Koreena home-screen icon is a launcher alias; opening it lands straight on her tab. */
+    private fun openedAsKoreena(i: android.content.Intent?) = i?.component?.className?.endsWith("KoreenaLauncher") == true
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (openedAsKoreena(intent)) viewModel.selectTab(NavigationTab.KOREENA)
+    }
 
     /** Android is short of RAM: give the offline AI model's memory back (it reloads on the next question). */
     override fun onTrimMemory(level: Int) {
@@ -103,6 +113,7 @@ class MainActivity : FragmentActivity() {
         com.example.data.memory.MemorySyncEngine.start(applicationContext)
         com.example.data.hitl.HitlApprovalService.sync(applicationContext)
         com.example.data.ai.OfflineLlm.get(applicationContext)
+        if (savedInstanceState == null && openedAsKoreena(intent)) viewModel.selectTab(NavigationTab.KOREENA)
 
         setContent {
             MyApplicationTheme {
@@ -258,6 +269,21 @@ class MainActivity : FragmentActivity() {
                                 )
 
                                 NavigationBarItem(
+                                    selected = currentTab == NavigationTab.KOREENA,
+                                    onClick = { viewModel.selectTab(NavigationTab.KOREENA) },
+                                    icon = { Icon(Icons.Default.School, contentDescription = "Miss Koreena, Linux tutor") },
+                                    label = { Text("Koreena", fontSize = 9.sp, maxLines = 1, softWrap = false) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = Color.White,
+                                        selectedTextColor = LightningYellow,
+                                        indicatorColor = Color(0xFF2DD4BF).copy(alpha = 0.5f),
+                                        unselectedIconColor = TextMuted,
+                                        unselectedTextColor = TextMuted
+                                    ),
+                                    modifier = Modifier.testTag("nav_koreena")
+                                )
+
+                                NavigationBarItem(
                                     selected = currentTab == NavigationTab.RECOVERY_AI,
                                     onClick = { viewModel.selectTab(NavigationTab.RECOVERY_AI) },
                                     icon = { Icon(Icons.Default.Forum, contentDescription = "Recovery AI") },
@@ -395,6 +421,11 @@ class MainActivity : FragmentActivity() {
                                         onManageNodes = { viewModel.selectTab(NavigationTab.NODES) }
                                     )
 
+                                    NavigationTab.KOREENA -> KoreenaScreen(
+                                        vm = koreenaViewModel,
+                                        ai = androidx.lifecycle.viewmodel.compose.viewModel()
+                                    )
+
                                     NavigationTab.AI_LAB -> {
                                         val openRouterApiKey by viewModel.openRouterApiKey.collectAsStateWithLifecycle()
                                         val selectedOpenRouterModel by viewModel.selectedOpenRouterModel.collectAsStateWithLifecycle()
@@ -472,7 +503,11 @@ class MainActivity : FragmentActivity() {
                                     }
                                     NavigationTab.CHEAT_SHEET -> {
                                         CheatSheetScreen(
-                                            onNavigateBack = { viewModel.selectTab(NavigationTab.DASHBOARD) }
+                                            onNavigateBack = { viewModel.selectTab(NavigationTab.DASHBOARD) },
+                                            onAskKoreena = { command ->
+                                                koreenaViewModel.setInput(command)
+                                                viewModel.selectTab(NavigationTab.KOREENA)
+                                            }
                                         )
                                     }
 

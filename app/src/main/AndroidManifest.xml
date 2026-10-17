@@ -45,6 +45,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Miss Koreena's own home-screen icon: same app, opens on her tab (MainActivity checks the alias name). -->
+        <activity-alias
+            android:name=".KoreenaLauncher"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:label="@string/koreena_label"
+            android:icon="@mipmap/ic_launcher_koreena"
+            android:roundIcon="@mipmap/ic_launcher_koreena_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" /></provider>
 
         <service

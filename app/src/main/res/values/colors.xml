@@ -7,4 +7,7 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Launcher backgrounds sampled from the Dr. Boltz / Miss Koreena tiles. -->
+    <color name="launcher_bg_boltz">#FF325E8B</color>
+    <color name="launcher_bg_koreena">#FF155054</color>
 </resources>
