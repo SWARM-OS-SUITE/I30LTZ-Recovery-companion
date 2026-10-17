@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  /* Viewport units, not percentages: inside this WebView a "height: 100%" chain collapsed to 0. */
+  html, body { margin: 0; background: #0C0D12; overflow: hidden; }
+  #t { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; padding: 2px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="t"></div>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script>
+(function () {
+  var host = window.AndroidTerm;
+  var el = document.getElementById('t');
+  var term = new Terminal({
+    cursorBlink: true, fontSize: 13, fontFamily: 'monospace', scrollback: 5000,
+    theme: { background: '#0C0D12', foreground: '#F1F5F9', cursor: '#76B900', selectionBackground: '#9D00FF88' }
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+
+  var ctrl = false;       // sticky Ctrl from the on-screen button
+  var selectMode = false; // touch selects whole lines
+  var anchor = -1;
+
+  function boxToViewport() { el.style.width = innerWidth + 'px'; el.style.height = innerHeight + 'px'; }
+  function doFit() { boxToViewport(); try { fit.fit(); } catch (e) {} }
+  window.addEventListener('resize', doFit);
+  new ResizeObserver(doFit).observe(el);
+  doFit();
+
+  term.onData(function (d) {
+    if (ctrl && d.length === 1) {
+      var c = d.toUpperCase().charCodeAt(0);
+      if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64); // Ctrl+@ .. Ctrl+_
+      ctrl = false;
+      host.onCtrlConsumed();
+    }
+    host.onInput(d);
+  });
+  term.onResize(function (s) { host.onResize(s.cols, s.rows); });
+
+  // ---- called from Kotlin ----
+  window.termWrite = function (b64) {              // terminal output, base64 so any byte survives
+    var bin = atob(b64), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    term.write(u);
+  };
+  window.termReset = function () { term.reset(); };
+  window.termPaste = function (text) { term.paste(text); };
+  window.termSetCtrl = function (on) { ctrl = !!on; };
+  window.termSetFont = function (px) { term.options.fontSize = px; doFit(); };
+  window.termCopy = function () { host.onCopy(term.getSelection()); };
+  window.termClearSelection = function () { term.clearSelection(); };
+  window.termSelectMode = function (on) { selectMode = !!on; if (!on) { term.clearSelection(); anchor = -1; } };
+  window.termFocus = function () { term.focus(); };
+  window.termType = function (text) { term.input(text, true); }; // as if typed on the keyboard (Ctrl-sticky applies)
+  window.termDump = function () {                  // visible text, used by tests
+    var b = term.buffer.active, out = [];
+    for (var i = 0; i < term.rows; i++) { var l = b.getLine(b.viewportY + i); out.push(l ? l.translateToString(true) : ''); }
+    return out.join('\n');
+  };
+
+  // ---- touch selection: tap or drag over lines, then press COPY ----
+  function lineAt(ev) {
+    var r = el.querySelector('.xterm-screen').getBoundingClientRect();
+    var y = ev.touches[0].clientY;
+    var row = Math.floor((y - r.top) / (r.height / term.rows));
+    return Math.max(0, Math.min(term.rows - 1, row)) + term.buffer.active.viewportY;
+  }
+  el.addEventListener('touchstart', function (ev) {
+    if (!selectMode) return;
+    anchor = lineAt(ev); term.selectLines(anchor, anchor); ev.preventDefault();
+  }, { passive: false });
+  el.addEventListener('touchmove', function (ev) {
+    if (!selectMode || anchor < 0) return;
+    var l = lineAt(ev); term.selectLines(Math.min(anchor, l), Math.max(anchor, l)); ev.preventDefault();
+  }, { passive: false });
+
+  // Announce only once the WebView has been laid out; before that the fit is a useless tiny size.
+  var announced = false;
+  function announce() {
+    if (announced) return;
+    if (el.clientWidth < 40 || el.clientHeight < 40) { setTimeout(announce, 50); return; } // timers, not frames: frames can be absent while hidden
+    doFit();
+    announced = true;
+    host.onReady(term.cols, term.rows);
+  }
+  announce();
+
+  // Diagnostics (shown in logcat for debug builds): why a terminal might not get a size.
+  var probes = 0;
+  var probe = setInterval(function () {
+    var dims = null; try { dims = fit.proposeDimensions(); } catch (e) { dims = 'err ' + e; }
+    host.onLog('probe ' + probes + ': el=' + el.clientWidth + 'x' + el.clientHeight + ' inner=' + innerWidth + 'x' + innerHeight +
+      ' css=' + (function(){ var c = getComputedStyle(el); return c.position + '/' + c.top + '/' + c.bottom + '/h=' + c.height + '/disp=' + c.display; })() + ' mode=' + document.compatMode + ' body=' + document.body.clientHeight + ' vis=' + document.visibilityState + ' term=' + term.cols + 'x' + term.rows + ' fit=' + JSON.stringify(dims) + ' announced=' + announced);
+    if (++probes >= 8 || announced) clearInterval(probe);
+  }, 1000);
+
+  // Safety net: if a resize event is missed (keyboard shown/hidden, rotation), refit when the box changed.
+  var lastW = 0, lastH = 0;
+  setInterval(function () {
+    if (!announced) return;
+    if (innerWidth !== lastW || innerHeight !== lastH) { lastW = innerWidth; lastH = innerHeight; doFit(); }
+  }, 400);
+})();
+</script>
+</body>
+</html>

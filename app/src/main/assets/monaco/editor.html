@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Coder Droid Editor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1e1e1e; }
+  #editor-container { width: 100%; height: 100%; }
+</style>
+<link href="vs/editor/editor.main.css" rel="stylesheet"/>
+</head>
+<body>
+<div id="editor-container"></div>
+<script src="vs/loader.js"></script>
+<script>
+require.config({ paths: { vs: 'vs' } });
+
+// Size the page from window.innerHeight, not from percentages or vh: inside an Android WebView hosted by Compose,
+// both resolve to 0 (verified on the emulator: a 100vh element measured 0px while innerHeight was correct), which left
+// Monaco working but invisible. Pixel heights from innerHeight work everywhere.
+function fitToWindow() {
+  const h = window.innerHeight + 'px';
+  document.documentElement.style.height = h;
+  document.body.style.height = h;
+  document.getElementById('editor-container').style.height = h;
+  if (window.monacoEditor) window.monacoEditor.layout();
+}
+window.addEventListener('resize', fitToWindow);
+fitToWindow();
+
+require(['vs/editor/editor.main'], function() {
+
+  // ── Create Monaco editor ────────────────────────────────────────────────────
+  const editor = monaco.editor.create(document.getElementById('editor-container'), {
+    value: '',
+    language: 'plaintext',
+    theme: 'vs-dark',
+    fontSize: 13,
+    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+    fontLigatures: true,
+    lineNumbers: 'on',
+    minimap: { enabled: false, maxColumn: 80 },
+    scrollBeyondLastLine: false,
+    wordWrap: 'off',
+    tabSize: 4,
+    insertSpaces: true,
+    renderWhitespace: 'selection',
+    smoothScrolling: true,
+    cursorBlinking: 'smooth',
+    cursorSmoothCaretAnimation: 'on',
+    bracketPairColorization: { enabled: true },
+    guides: { bracketPairs: true, indentation: true },
+    formatOnPaste: false,
+    formatOnType: false,
+    automaticLayout: true,       // recalculates on container resize
+  });
+
+  window.monacoEditor = editor;
+  fitToWindow();
+
+  // ── State ───────────────────────────────────────────────────────────────────
+  let currentTabId = null;
+  let isLoading    = false;
+
+  // Map tabId → editor model (so switching tabs restores scroll/cursor)
+  const models = new Map();
+  // Tabs whose file could not be safely loaded (binary, too big, not UTF-8): never offered for saving.
+  const readOnlyTabs = new Set();
+
+  // ── Content change → notify Android ────────────────────────────────────────
+  editor.onDidChangeModelContent(() => {
+    if (!isLoading && currentTabId) {
+      Android.onContentChanged(currentTabId, editor.getValue());
+    }
+  });
+
+  // ── Cursor change → update status bar ──────────────────────────────────────
+  editor.onDidChangeCursorPosition(e => {
+    Android.onCursorMoved(e.position.lineNumber, e.position.column);
+  });
+
+  // ── Ctrl/Cmd+S → save ──────────────────────────────────────────────────────
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    if (currentTabId && !readOnlyTabs.has(currentTabId)) {
+      Android.onSaveRequested(currentTabId, editor.getValue());
+    }
+  });
+
+  // ── Public API called from Kotlin via evaluateJavascript ──────────────────
+  // Every function is defensive: a bad call from Kotlin must never throw into the WebView.
+  const safe = (fn) => function() { try { return fn.apply(null, arguments); } catch (e) { return JSON.stringify({ error: String(e) }); } };
+
+  window.coderdroid = {
+
+    /** openFile({ tabId, path, language, content, readOnly }) — shows (and creates on first use) the tab's model. */
+    openFile: safe(function({ tabId, path, language, content, readOnly }) {
+      isLoading = true;
+      currentTabId = tabId;
+      let model = models.get(tabId);
+      if (!model) {
+        model = monaco.editor.createModel(content, language);
+        models.set(tabId, model);
+      }
+      if (readOnly) readOnlyTabs.add(tabId); else readOnlyTabs.delete(tabId);
+      editor.updateOptions({ readOnly: !!readOnly });
+      editor.setModel(model);
+      editor.focus();
+      isLoading = false;
+    }),
+
+    /** closeTab(tabId) — disposes the model to free memory. */
+    closeTab: safe(function(tabId) {
+      const model = models.get(tabId);
+      if (model) { model.dispose(); models.delete(tabId); }
+      readOnlyTabs.delete(tabId);
+      if (currentTabId === tabId) { currentTabId = null; editor.setModel(null); }
+    }),
+
+    /** reloadFile({ tabId, content }) — replaces a clean tab's text after the file changed on disk (e.g. git pull). */
+    reloadFile: safe(function({ tabId, content }) {
+      const model = models.get(tabId);
+      if (!model || model.getValue() === content) return;
+      isLoading = true;
+      model.setValue(content);
+      isLoading = false;
+    }),
+
+    /** setTheme('vs-dark' | 'vs' | 'hc-black') */
+    setTheme: safe(function(theme) { monaco.editor.setTheme(theme); }),
+
+    /** setOptions({ fontSize, wordWrap: 'on'|'off', minimap: bool }) */
+    setOptions: safe(function(o) {
+      const update = {};
+      if (o.fontSize) update.fontSize = o.fontSize;
+      if (o.wordWrap) update.wordWrap = o.wordWrap;
+      if (typeof o.minimap === 'boolean') update.minimap = { enabled: o.minimap, maxColumn: 80 };
+      editor.updateOptions(update);
+    }),
+
+    /** insertSnippet(text) — paste at the cursor (replaces the selection if there is one). */
+    insertSnippet: safe(function(text) {
+      editor.executeEdits('snippet', [{ range: editor.getSelection(), text: text, forceMoveMarkers: true }]);
+      editor.focus();
+    }),
+
+    /** replaceSelection(text) — same edit, but a no-op when nothing is selected so a stray tap cannot damage code. */
+    replaceSelection: safe(function(text) {
+      const sel = editor.getSelection();
+      if (!sel || sel.isEmpty()) return false;
+      editor.executeEdits('ai-replace', [{ range: sel, text: text, forceMoveMarkers: true }]);
+      editor.focus();
+      return true;
+    }),
+
+    /** getContext() — JSON for the AI panel: language, selected text, current line and the whole file. */
+    getContext: safe(function() {
+      const model = editor.getModel();
+      if (!model) return JSON.stringify({ hasFile: false });
+      const sel = editor.getSelection();
+      return JSON.stringify({
+        hasFile: true,
+        tabId: currentTabId,
+        language: model.getLanguageId(),
+        hasSelection: !sel.isEmpty(),
+        selection: sel.isEmpty() ? '' : model.getValueInRange(sel),
+        line: sel.startLineNumber,
+        text: model.getValue()
+      });
+    }),
+
+    /** run(action) — find, replace, go to line, command palette, undo/redo, format. */
+    run: safe(function(action) {
+      const map = {
+        find: 'actions.find',
+        replace: 'editor.action.startFindReplace',
+        gotoLine: 'editor.action.gotoLine',
+        palette: 'editor.action.quickCommand',
+        format: 'editor.action.formatDocument',
+        undo: 'undo',
+        redo: 'redo',
+        comment: 'editor.action.commentLine',
+        tab: 'tab',
+        outdent: 'outdent',
+        left: 'cursorLeft',
+        right: 'cursorRight',
+        up: 'cursorUp',
+        down: 'cursorDown',
+        home: 'cursorHome',
+        end: 'cursorEnd'
+      };
+      if (!map[action]) return false;
+      editor.focus();
+      editor.trigger('keyboard', map[action], null);
+      return true;
+    }),
+
+    /** revealLine(n) — jump to a search result. */
+    revealLine: safe(function(n) {
+      editor.revealLineInCenter(n);
+      editor.setPosition({ lineNumber: n, column: 1 });
+      editor.focus();
+    })
+  };
+
+  // ── Tell Kotlin the editor is ready ────────────────────────────────────────
+  Android.onReady();
+});
+</script>
+</body>
+</html>
